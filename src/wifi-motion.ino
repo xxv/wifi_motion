@@ -2,16 +2,16 @@
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
-#include <ESP8266HTTPClient.h>
+#include <PubSubClient.h>
 
 #define MOTION_PIN 13
+// milliseconds
+#define RETRIGGER_DELAY 15000
 
-ESP8266WiFiMulti wifi;
+WiFiClient wifi;
+PubSubClient client(wifi);
 
-bool statusLed = HIGH;
-
-char *post_body = "motion";
+long last_motion = 0;
 
 void setup() {
   pinMode(0, OUTPUT);
@@ -20,44 +20,54 @@ void setup() {
   Serial.begin(115200);
 
   Serial.println("Connecting...");
-  wifi.addAP(ap_name, ap_password);
-}
+  WiFi.begin(ap_name, ap_password);
 
-void connected_loop() {
-  while (! digitalRead(MOTION_PIN)) {
-    delay(10);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
 
-  HTTPClient http;
+  randomSeed(micros());
+  Serial.println("Wifi Connected");
 
-  http.begin(http_server, http_port, http_path); //HTTP
-
-  int httpCode = http.POST((uint8_t *)post_body, strlen(post_body));
-  if(httpCode) {
-      Serial.printf("Success!: %d\n", httpCode);
-  } else {
-      Serial.write("Error POSTing\n");
-  }
-
-  delay(15 * 1000);
+  client.setServer(mqtt_host, mqtt_port);
 }
+
+void check_motion() {
+  long now = millis();
+  if (digitalRead(MOTION_PIN) && (last_motion == 0 || (now - last_motion) > RETRIGGER_DELAY)) {
+    last_motion = now;
+    client.publish(mqtt_topic, "");
+    delay(500);
+  }
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    // Create a random client ID
+    String clientId = "ESP8266Client-";
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
 
 void loop() {
-  digitalWrite(0, statusLed);
-  // wait for WiFi connection
-   if((wifi.run() == WL_CONNECTED)) {
-      digitalWrite(0, HIGH);
-        Serial.print("Connected!\n");
+  while (!client.connected()) {
+    reconnect();
+  }
 
-        while (wifi.run() == WL_CONNECTED) {
-          connected_loop();
-        }
-
-        // Turn off again
-        digitalWrite(0, LOW);
-    }
-
-  delay(500);
-
-  statusLed = statusLed == LOW ? HIGH : LOW;
+  client.loop();
+  check_motion();
 }
