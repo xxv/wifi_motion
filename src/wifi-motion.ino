@@ -8,7 +8,7 @@
 // milliseconds
 #define RETRIGGER_DELAY 15000
 
-WiFiClient wifi;
+WiFiClientSecure wifi;
 PubSubClient client(wifi);
 
 long last_motion = 0;
